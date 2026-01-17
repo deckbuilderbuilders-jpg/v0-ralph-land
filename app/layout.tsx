@@ -1,5 +1,5 @@
 import type React from "react"
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import "./globals.css"
@@ -11,6 +11,20 @@ export const metadata: Metadata = {
   title: "Ralph Builder - No-Code App Creation Platform",
   description: "Build production-ready web applications without writing code using AI-powered autonomous development.",
   generator: "v0.app",
+  keywords: ["no-code", "app builder", "AI", "Claude", "Next.js", "web development"],
+  authors: [{ name: "Ralph Builder" }],
+  openGraph: {
+    title: "Ralph Builder - No-Code App Creation Platform",
+    description:
+      "Build production-ready web applications without writing code using AI-powered autonomous development.",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Ralph Builder - No-Code App Creation Platform",
+    description:
+      "Build production-ready web applications without writing code using AI-powered autonomous development.",
+  },
   icons: {
     icon: [
       {
@@ -30,14 +44,30 @@ export const metadata: Metadata = {
   },
 }
 
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" dir="ltr" suppressHydrationWarning>
       <body className={`font-sans antialiased`}>
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md"
+        >
+          Skip to main content
+        </a>
         {children}
         <Analytics />
       </body>

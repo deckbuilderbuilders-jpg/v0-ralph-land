@@ -6,6 +6,7 @@ import { FileText, ArrowRight, ArrowLeft, Edit3, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { useAppStore } from "@/lib/store"
+import { StepProgress, STEP_ESTIMATES } from "@/components/step-progress"
 
 export function PrdStep() {
   const { prd, setPrd, setStep, setCostEstimate, setIsLoading, isLoading } = useAppStore()
@@ -60,10 +61,22 @@ export function PrdStep() {
         </p>
       </div>
 
+      <StepProgress
+        isLoading={isLoading}
+        stepName={STEP_ESTIMATES.estimateCost.name}
+        estimatedSeconds={STEP_ESTIMATES.estimateCost.seconds}
+        description={STEP_ESTIMATES.estimateCost.description}
+      />
+
       <div className="space-y-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-sm font-medium text-muted-foreground">Product Requirements Document</span>
-          <Button variant="ghost" size="sm" onClick={() => (isEditing ? handleSaveEdit() : setIsEditing(true))}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => (isEditing ? handleSaveEdit() : setIsEditing(true))}
+            disabled={isLoading}
+          >
             {isEditing ? (
               <>
                 <Check className="mr-2 h-4 w-4" /> Save
@@ -81,6 +94,7 @@ export function PrdStep() {
             value={editedPrd}
             onChange={(e) => setEditedPrd(e.target.value)}
             className="min-h-[400px] text-sm font-mono bg-card border-border resize-none"
+            disabled={isLoading}
           />
         ) : (
           <div className="p-6 rounded-xl bg-card border border-border max-h-[400px] overflow-y-auto">
@@ -89,17 +103,20 @@ export function PrdStep() {
         )}
 
         <div className="flex gap-3">
-          <Button variant="outline" onClick={() => setStep("clarify")} className="flex-1 h-12">
+          <Button variant="outline" onClick={() => setStep("clarify")} className="flex-1 h-12" disabled={isLoading}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back
           </Button>
           <Button onClick={handleContinue} disabled={isLoading} className="flex-1 h-12">
             {isLoading ? (
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Number.POSITIVE_INFINITY, ease: "linear" }}
-                className="h-5 w-5 border-2 border-current border-t-transparent rounded-full"
-              />
+              <span className="flex items-center gap-2">
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Number.POSITIVE_INFINITY, ease: "linear" }}
+                  className="h-5 w-5 border-2 border-current border-t-transparent rounded-full"
+                />
+                Analyzing complexity...
+              </span>
             ) : (
               <>
                 Get Estimate

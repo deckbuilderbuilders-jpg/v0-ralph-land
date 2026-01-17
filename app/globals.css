@@ -132,4 +132,42 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* Added focus visible styles for accessibility */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-primary;
+  }
+
+  /* Reduced motion for users who prefer it */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* Better touch targets on mobile */
+  @media (max-width: 768px) {
+    button,
+    [role="button"],
+    input,
+    textarea,
+    select {
+      min-height: 44px;
+    }
+  }
+
+  /* Scroll behavior */
+  html {
+    scroll-behavior: smooth;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
 }

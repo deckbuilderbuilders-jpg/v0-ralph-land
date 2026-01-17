@@ -15,12 +15,14 @@ import {
   Eye,
   ListTodo,
   RefreshCw,
+  Clock,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAppStore } from "@/lib/store"
 import { parseGeneratedCode, mergeGeneratedFiles, type GeneratedFile } from "@/lib/file-parser"
 import { generateTodoFromPRD, type BuildContext, type IterationResult } from "@/lib/build-context"
 import type { TestResult } from "@/lib/code-tester"
+import { BuildProgressBar } from "@/components/step-progress"
 
 export function BuildStep() {
   const {
@@ -35,9 +37,7 @@ export function BuildStep() {
     setStep,
     paymentVerification,
     stripeSessionId,
-    buildContext,
     setBuildContext,
-    todoList,
     updateTodoItem,
     addIterationResult,
     setCurrentTestResult,
@@ -46,6 +46,7 @@ export function BuildStep() {
     previewHTML,
     githubConfig,
     setLastGithubSync,
+    todoList,
   } = useAppStore()
 
   const hasStarted = useRef(false)
@@ -57,8 +58,42 @@ export function BuildStep() {
   const [showPreview, setShowPreview] = useState(false)
   const [showTodoList, setShowTodoList] = useState(false)
   const [currentIteration, setCurrentIteration] = useState(0)
+  const [totalIterations, setTotalIterations] = useState(0)
   const [isTesting, setIsTesting] = useState(false)
   const [isSyncingGithub, setIsSyncingGithub] = useState(false)
+  const [buildPhase, setBuildPhase] = useState<"verifying" | "building" | "testing" | "syncing" | "complete">(
+    "verifying",
+  )
+  const [buildStartTime, setBuildStartTime] = useState<number | null>(null)
+  const [elapsedTime, setElapsedTime] = useState(0)
+
+  useEffect(() => {
+    if (isPaymentValid && !buildStartTime) {
+      setBuildStartTime(Date.now())
+    }
+  }, [isPaymentValid, buildStartTime])
+
+  useEffect(() => {
+    if (!buildStartTime || buildPhase === "complete") return
+
+    const interval = setInterval(() => {
+      setElapsedTime(Math.floor((Date.now() - buildStartTime) / 1000))
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [buildStartTime, buildPhase])
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    if (mins === 0) return `${secs}s`
+    return `${mins}m ${secs}s`
+  }
+
+  const estimatedSecondsPerIteration = 50 // ~45s build + 5s test
+  const estimatedTotalSeconds =
+    (totalIterations || costEstimate?.estimates.iterations || 8) * estimatedSecondsPerIteration
+  const estimatedRemainingSeconds = Math.max(estimatedTotalSeconds - elapsedTime, 0)
 
   // Payment verification effect
   useEffect(() => {
@@ -106,16 +141,18 @@ export function BuildStep() {
     hasStarted.current = true
 
     const runBuild = async () => {
-      const totalIterations = costEstimate?.estimates.iterations || 8
+      const iterations = costEstimate?.estimates.iterations || 8
+      setTotalIterations(iterations)
+      setBuildPhase("building")
 
       // Initialize build context with todo list
-      const initialTodos = generateTodoFromPRD(prd, totalIterations)
+      const initialTodos = generateTodoFromPRD(prd, iterations)
       const initialContext: BuildContext = {
         prd,
         todoList: initialTodos,
         progress: {
           currentIteration: 0,
-          totalIterations,
+          totalIterations: iterations,
           phase: "setup",
           completedTasks: [],
           currentTask: "",
@@ -128,7 +165,7 @@ export function BuildStep() {
 
       addBuildLog({
         iteration: 0,
-        message: `Payment verified. Starting build with ${totalIterations} iterations...`,
+        message: `Payment verified. Starting build with ${iterations} iterations...`,
         type: "success",
       })
 
@@ -136,8 +173,9 @@ export function BuildStep() {
       let allFiles: GeneratedFile[] = []
       let currentContext = initialContext
 
-      for (let i = 1; i <= totalIterations; i++) {
+      for (let i = 1; i <= iterations; i++) {
         setCurrentIteration(i)
+        setBuildPhase("building")
 
         // Update current task in todo list
         const currentTodo = currentContext.todoList.find((t) => t.iteration === i)
@@ -147,7 +185,7 @@ export function BuildStep() {
 
         addBuildLog({
           iteration: i,
-          message: `Iteration ${i}/${totalIterations}: ${currentTodo?.task || "Building..."}`,
+          message: `Iteration ${i}/${iterations}: ${currentTodo?.task || "Building..."}`,
           type: "info",
         })
 
@@ -158,7 +196,7 @@ export function BuildStep() {
             body: JSON.stringify({
               prd,
               iteration: i,
-              totalIterations,
+              totalIterations: iterations,
               previousFiles: allFiles.map((f) => ({ path: f.path })),
               sessionId: stripeSessionId,
               buildContext: currentContext,
@@ -238,6 +276,7 @@ export function BuildStep() {
           accumulatedCode += `\n// === ITERATION ${i} ===\n${iterationCode}`
 
           // Run tests on generated code
+          setBuildPhase("testing")
           setIsTesting(true)
           addBuildLog({
             iteration: i,
@@ -285,24 +324,9 @@ export function BuildStep() {
           }
           setIsTesting(false)
 
-          // Add iteration result to history
-          addIterationResult(iterationResult)
-
-          // Update build context for next iteration
-          currentContext = {
-            ...currentContext,
-            progress: {
-              ...currentContext.progress,
-              currentIteration: i,
-              filesGenerated: allFiles.length,
-              linesOfCode: allFiles.reduce((acc, f) => acc + f.content.split("\n").length, 0),
-            },
-            iterationHistory: [...currentContext.iterationHistory, iterationResult],
-          }
-          setBuildContext(currentContext)
-
           // Sync to GitHub if configured
           if (githubConfig?.connected) {
+            setBuildPhase("syncing")
             setIsSyncingGithub(true)
             addBuildLog({
               iteration: i,
@@ -362,14 +386,15 @@ export function BuildStep() {
           }
         }
 
-        setBuildProgress((i / totalIterations) * 100)
+        setBuildProgress((i / iterations) * 100)
       }
 
       setGeneratedCode(accumulatedCode)
       setGeneratedFiles(allFiles)
+      setBuildPhase("complete")
 
       addBuildLog({
-        iteration: totalIterations + 1,
+        iteration: iterations + 1,
         message: `Build complete! Generated ${allFiles.length} files. Ready for download.`,
         type: "success",
       })
@@ -457,7 +482,38 @@ export function BuildStep() {
           <Hammer className="h-8 w-8 text-primary" />
         </motion.div>
         <h2 className="text-3xl font-bold mb-3">Building Your App</h2>
-        <p className="text-muted-foreground">Claude is autonomously generating your application code</p>
+        <p className="text-muted-foreground mb-4">Claude is autonomously generating your application code</p>
+
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.2 }}
+          className="inline-flex items-center gap-6 px-6 py-3 rounded-xl bg-card border border-border"
+        >
+          <div className="flex items-center gap-2">
+            <Clock className="h-5 w-5 text-primary" />
+            <div className="text-left">
+              <p className="text-xs text-muted-foreground">Estimated Total</p>
+              <p className="text-lg font-bold text-primary">{formatTime(estimatedTotalSeconds)}</p>
+            </div>
+          </div>
+          <div className="h-8 w-px bg-border" />
+          <div className="text-left">
+            <p className="text-xs text-muted-foreground">Time Remaining</p>
+            <p className="text-lg font-bold">
+              {buildPhase === "complete" ? (
+                <span className="text-green-500">Done!</span>
+              ) : (
+                formatTime(estimatedRemainingSeconds)
+              )}
+            </p>
+          </div>
+          <div className="h-8 w-px bg-border" />
+          <div className="text-left">
+            <p className="text-xs text-muted-foreground">Elapsed</p>
+            <p className="text-lg font-bold text-muted-foreground">{formatTime(elapsedTime)}</p>
+          </div>
+        </motion.div>
       </div>
 
       {error && (
@@ -470,23 +526,23 @@ export function BuildStep() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main build panel */}
         <div className="lg:col-span-2 space-y-6">
-          {/* Progress bar */}
-          <div className="space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-muted-foreground">
-                {currentFile ? `Writing: ${currentFile}` : `Iteration ${currentIteration}`}
-              </span>
-              <span className="font-medium">{Math.round(buildProgress)}%</span>
-            </div>
-            <div className="h-3 bg-secondary rounded-full overflow-hidden">
-              <motion.div
-                className="h-full bg-primary rounded-full"
-                initial={{ width: 0 }}
-                animate={{ width: `${buildProgress}%` }}
-                transition={{ duration: 0.5 }}
-              />
-            </div>
-          </div>
+          <BuildProgressBar
+            currentIteration={currentIteration}
+            totalIterations={totalIterations || costEstimate?.estimates.iterations || 8}
+            phase={buildPhase}
+            buildProgress={buildProgress}
+          />
+
+          {/* Current file indicator */}
+          {currentFile && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="text-sm text-muted-foreground text-center"
+            >
+              Writing: <span className="font-mono text-primary">{currentFile}</span>
+            </motion.div>
+          )}
 
           {/* Status indicators */}
           <div className="flex items-center justify-center gap-4 text-sm">
@@ -588,28 +644,28 @@ export function BuildStep() {
               className="p-4 rounded-xl bg-card border border-border"
             >
               <h3 className="text-sm font-medium mb-3">Build Tasks</h3>
-              <div className="space-y-2">
-                {(buildContext?.todoList || todoList).map((item) => (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {todoList.map((item) => (
                   <div
                     key={item.id}
-                    className={`flex items-center gap-2 text-xs ${
+                    className={`flex items-center gap-2 text-xs p-2 rounded-lg ${
                       item.status === "completed"
-                        ? "text-green-400"
+                        ? "bg-green-500/10 text-green-400"
                         : item.status === "in-progress"
-                          ? "text-yellow-400"
+                          ? "bg-primary/10 text-primary"
                           : item.status === "failed"
-                            ? "text-red-400"
-                            : "text-muted-foreground"
+                            ? "bg-red-500/10 text-red-400"
+                            : "bg-secondary text-muted-foreground"
                     }`}
                   >
                     {item.status === "completed" ? (
-                      <CheckCircle2 className="h-3 w-3" />
+                      <CheckCircle2 className="h-3 w-3 flex-shrink-0" />
                     ) : item.status === "in-progress" ? (
-                      <RefreshCw className="h-3 w-3 animate-spin" />
+                      <RefreshCw className="h-3 w-3 flex-shrink-0 animate-spin" />
                     ) : item.status === "failed" ? (
-                      <XCircle className="h-3 w-3" />
+                      <XCircle className="h-3 w-3 flex-shrink-0" />
                     ) : (
-                      <div className="h-3 w-3 rounded-full border border-current" />
+                      <div className="h-3 w-3 rounded-full border border-current flex-shrink-0" />
                     )}
                     <span className="truncate">{item.task}</span>
                   </div>
@@ -618,75 +674,24 @@ export function BuildStep() {
             </motion.div>
           )}
 
-          {/* Test Results */}
-          {currentTestResult && (
-            <div className="p-4 rounded-xl bg-card border border-border">
-              <h3 className="text-sm font-medium mb-3">Test Results</h3>
-              <div className="space-y-2 text-xs">
-                <div
-                  className={`flex items-center gap-2 ${currentTestResult.passed ? "text-green-400" : "text-red-400"}`}
-                >
-                  {currentTestResult.passed ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
-                  <span>{currentTestResult.passed ? "All tests passed" : "Tests failed"}</span>
-                </div>
-                {currentTestResult.errors.length > 0 && (
-                  <div className="text-red-400 space-y-1">
-                    {currentTestResult.errors.slice(0, 3).map((err, i) => (
-                      <p key={i} className="truncate">
-                        {err}
-                      </p>
-                    ))}
-                    {currentTestResult.errors.length > 3 && <p>+{currentTestResult.errors.length - 3} more...</p>}
-                  </div>
-                )}
-                {currentTestResult.warnings.length > 0 && (
-                  <div className="text-yellow-400">{currentTestResult.warnings.length} warnings</div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Token usage */}
-          {costEstimate && (
-            <div className="p-4 rounded-xl bg-card border border-border">
-              <h3 className="text-sm font-medium mb-2">Token Usage</h3>
-              <p className="text-xs text-muted-foreground">
-                Est. ~{Math.round(costEstimate.estimates.totalTokens / 1000)}k tokens
-              </p>
-            </div>
+          {/* Preview */}
+          {showPreview && previewHTML && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              className="rounded-xl border border-border overflow-hidden"
+            >
+              <div className="p-2 bg-card border-b border-border text-xs font-medium">Preview</div>
+              <iframe
+                srcDoc={previewHTML}
+                className="w-full h-64 bg-white"
+                sandbox="allow-scripts"
+                title="Code Preview"
+              />
+            </motion.div>
           )}
         </div>
       </div>
-
-      {/* Preview Modal */}
-      {showPreview && previewHTML && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-          onClick={() => setShowPreview(false)}
-        >
-          <motion.div
-            initial={{ scale: 0.9 }}
-            animate={{ scale: 1 }}
-            className="bg-card rounded-xl border border-border w-full max-w-4xl h-[80vh] overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between p-4 border-b border-border">
-              <h3 className="font-medium">Code Preview</h3>
-              <Button variant="ghost" size="sm" onClick={() => setShowPreview(false)}>
-                Close
-              </Button>
-            </div>
-            <iframe
-              srcDoc={previewHTML}
-              className="w-full h-full border-0"
-              title="Code Preview"
-              sandbox="allow-scripts"
-            />
-          </motion.div>
-        </motion.div>
-      )}
     </motion.div>
   )
 }
